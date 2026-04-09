@@ -11,31 +11,38 @@ import pandas as pd
 st.set_page_config(page_title="Exames", layout="wide")
 
 # =========================
-# LOGIN
+# LOGIN CONFIG
 # =========================
 USUARIO = "familia"
 SENHA = "1234"
 
+# =========================
+# SESSION INIT
+# =========================
 if "logado" not in st.session_state:
-    st.session_state["logado"] = False
+    st.session_state.logado = False
 
-def fazer_login():
-    user = st.session_state.get("user", "").strip()
-    password = st.session_state.get("password", "").strip()
-
-    if user == USUARIO and password == SENHA:
-        st.session_state["logado"] = True
-    else:
-        st.session_state["logado"] = False
-        st.error("Usuário ou senha inválidos")
-
-if not st.session_state["logado"]:
+# =========================
+# TELA LOGIN (FORMA MAIS ESTÁVEL)
+# =========================
+if not st.session_state.logado:
     st.title("🔐 Login")
 
-    st.text_input("Usuário", key="user")
-    st.text_input("Senha", type="password", key="password")
+    user = st.text_input("Usuário")
+    password = st.text_input("Senha", type="password")
 
-    st.button("Entrar", on_click=fazer_login)
+    if st.button("Entrar"):
+
+        # DEBUG VISÍVEL
+        st.write("DEBUG USER:", user)
+        st.write("DEBUG PASS:", password)
+
+        if user.strip() == USUARIO and password.strip() == SENHA:
+            st.session_state.logado = True
+            st.success("Login realizado!")
+            st.rerun()
+        else:
+            st.error("Usuário ou senha inválidos")
 
     st.stop()
 
@@ -75,7 +82,7 @@ def limpar_dados(lista):
     return nova_lista
 
 # =========================
-# EXTRAÇÃO (SIMPLES POR ENQUANTO)
+# EXTRAÇÃO MOCK
 # =========================
 def extrair_dados_pdf(nome_arquivo):
     return [
@@ -121,7 +128,7 @@ def carregar_uploads():
     return res.data if res.data else []
 
 # =========================
-# UI
+# APP PRINCIPAL
 # =========================
 st.title("📊 Exames do Paciente")
 
@@ -154,13 +161,10 @@ if dados:
 
     st.dataframe(df)
 
-    # gráfico por exame
     exames = df["exame"].unique()
-
     exame_sel = st.selectbox("Escolha o exame", exames)
 
     df_f = df[df["exame"] == exame_sel]
-
     df_f = df_f.sort_values("data")
 
     st.line_chart(df_f.set_index("data")["valor"])
