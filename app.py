@@ -30,14 +30,12 @@ if not st.session_state.logado:
         if entrar:
             if usuario.strip() == "admin" and senha.strip() == "123":
                 st.session_state.logado = True
-                st.success("Login realizado!")
                 st.rerun()
             else:
-                st.error(f"Usuário ou senha inválidos → ({usuario} / {senha})")
+                st.error("Usuário ou senha inválidos")
 
     st.stop()
 
-# LOGOUT
 st.sidebar.button(
     "Logout",
     on_click=lambda: st.session_state.update({"logado": False})
@@ -75,6 +73,7 @@ def extrair_data(texto):
     return None
 
 
+# 🔥 PARSER FINAL PROFISSIONAL
 def extrair_exames(texto):
     exames = []
     linhas = texto.split("\n")
@@ -84,22 +83,40 @@ def extrair_exames(texto):
     for linha in linhas:
         linha = linha.strip()
 
+        # IGNORAR LIXO
         if (
-            len(linha) > 3 and
+            linha == "" or
+            "===" in linha or
+            "RESULTADO" in linha or
+            "RESULTADOS" in linha or
+            "MATERIAL" in linha or
+            "REFER" in linha or
+            "INTERVALO" in linha or
+            len(linha) < 3
+        ):
+            continue
+
+        # LIMPAR LINHA
+        linha = re.sub(r"=+", "", linha).strip()
+
+        # DETECTAR NOME DO EXAME
+        if (
             linha.isupper() and
             not re.search(r"\d", linha) and
-            "REFER" not in linha and
-            "MATERIAL" not in linha and
-            "INTERVALO" not in linha
+            len(linha) < 60
         ):
             nome_atual = linha
             continue
 
-        match = re.search(r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)", linha)
+        # DETECTAR VALOR
+        match = re.search(
+            r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)",
+            linha
+        )
 
         if match and nome_atual:
             exames.append({
-                "nome_exame": nome_atual.strip(),
+                "nome_exame": nome_atual,
                 "valor": float(match.group(1).replace(",", ".")),
                 "unidade": match.group(2)
             })
