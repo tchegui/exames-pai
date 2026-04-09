@@ -3,109 +3,169 @@ import pdfplumber
 import pandas as pd
 import re
 from datetime import datetime
-import matplotlib.pyplot as plt
+import plotly.express as px
+import os
 
-st.title("📊 Leitor de Exames")
+st.set_page_config(layout="wide")
 
-uploaded_file = st.file_uploader("Envie seu PDF", type="pdf")
+# =========================
+# LOGIN SIMPLES
+# =========================
+USUARIO = "familia"
+SENHA = "1234"
+
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+if not st.session_state.logado:
+    st.title("🔐 Login")
+
+    user = st.text_input("Usuário")
+    pwd = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        if user == USUARIO and pwd == SENHA:
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Usuário ou senha incorretos")
+
+    st.stop()
+
+# =========================
+# APP
+# =========================
+st.title("📊 Monitor de Exames")
+
+ARQUIVO_DADOS = "historico_exames.csv"
+
+if os.path.exists(ARQUIVO_DADOS):
+    historico = pd.read_csv(ARQUIVO_DADOS, parse_dates=["data"])
+else:
+    historico = pd.DataFrame(columns=["paciente", "data", "exame", "valor", "unidade"])
+
+uploaded_file = st.file_uploader("Envie PDF", type="pdf")
+
+MAPA_EXAMES = {
+    "HEMOGLOBINA": "HEMOGLOBINA",
+    "LEUCÓCITOS": "LEUCOCITOS",
+    "PLAQUETAS": "PLAQUETAS",
+    "POTASSIO": "POTASSIO",
+    "SODIO": "SODIO",
+    "PROTEINA C-REATIVA": "PCR",
+}
+
+LIMITES = {
+    "HEMOGLOBINA": (12, 17),
+    "LEUCOCITOS": (4000, 10000),
+    "PCR": (0, 0.5),
+    "POTASSIO": (3.5, 5.1),
+}
+
+def normalizar_exame(nome):
+    nome = nome.upper()
+    for k in MAPA_EXAMES:
+        if k in nome:
+            return MAPA_EXAMES[k]
+    return nome
 
 def extrair_dados(pdf_file):
     texto = ""
-
     with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            texto += page.extract_text() + "\n"
+        for p in pdf.pages:
+            t = p.extract_text()
+            if t:
+                texto += t + "\n"
 
     linhas = texto.split("\n")
     dados = []
 
-    nome_paciente = "Paciente"
+    paciente = "Paciente"
     data = datetime.now()
 
-    # =========================
-    # PEGAR NOME E DATA
-    # =========================
-    for i, linha in enumerate(linhas):
-        linha_limpa = linha.strip()
+    for linha in linhas:
+        if "OBERON" in linha.upper():
+            paciente = linha.strip()
 
-        # detectar data e nome acima
-        if re.match(r'\d{2}/\d{2}/\d{4}', linha_limpa):
-            if i > 0:
-                nome_paciente = linhas[i-1].strip()
-
-        # detectar data coleta
         if "COLETADO EM:" in linha:
-            match = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
-            if match:
-                data = datetime.strptime(match.group(1), "%d/%m/%Y")
+            m = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
+            if m:
+                data = datetime.strptime(m.group(1), "%d/%m/%Y")
 
-    # =========================
-    # EXTRAÇÃO POR BLOCOS
-    # =========================
-    for i in range(len(linhas)):
+        match = re.search(
+            r'([A-ZÇÃÉÍÓÚ\s]+?)\s*[:]\s*([\d\.,]+)\s*(mg/dL|mEq/L|mmol/L|g/dL|U/L|%|mmHg|/mm3)',
+            linha
+        )
 
-        linha = linhas[i].strip()
+        if match:
+            nome = normalizar_exame(match.group(1))
+            valor = float(match.group(2).replace(".", "").replace(",", "."))
+            unidade = match.group(3)
 
-        # Nome de exame em caixa alta
-        if linha.isupper() and len(linha) > 5:
+            dados.append({
+                "paciente": paciente,
+                "data": data,
+                "exame": nome,
+                "valor": valor,
+                "unidade": unidade
+            })
 
-            nome_exame = linha
+    return pd.DataFrame(dados)
 
-            # procurar valor nas próximas linhas
-            for j in range(i, min(i+10, len(linhas))):
-                linha2 = linhas[j]
+def interpretar(df, exame):
+    if exame not in LIMITES or len(df) < 1:
+        return "Sem interpretação disponível"
 
-                match = re.search(r'([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)', linha2)
+    min_v, max_v = LIMITES[exame]
+    atual = df.iloc[-1]["valor"]
 
-                if match:
-                    valor = float(match.group(1).replace(",", "."))
-                    unidade = match.group(2)
+    texto = ""
 
-                    dados.append({
-                        "exame": nome_exame,
-                        "valor": valor,
-                        "unidade": unidade
-                    })
-                    break
+    if atual < min_v:
+        texto += "🔴 Abaixo do normal. "
+    elif atual > max_v:
+        texto += "🔴 Acima do normal. "
+    else:
+        texto += "🟢 Dentro do normal. "
 
-    # =========================
-    # GASOMETRIA
-    # =========================
-    gasometria = re.findall(
-        r'(pH|pO2|pCO2|HCO3|BE|SO2)\s*:\s*([\d,\.]+)',
-        texto
-    )
+    if len(df) >= 2:
+        anterior = df.iloc[-2]["valor"]
+        if atual > anterior:
+            texto += "📈 Tendência de alta."
+        elif atual < anterior:
+            texto += "📉 Tendência de queda."
 
-    for nome, valor in gasometria:
-        dados.append({
-            "exame": f"GASOMETRIA - {nome}",
-            "valor": float(valor.replace(",", ".")),
-            "unidade": ""
-        })
-
-    return dados, data, nome_paciente
-
+    return texto
 
 # =========================
-# INTERFACE
+# PROCESSAR PDF
 # =========================
 if uploaded_file:
-    dados, data, nome_paciente = extrair_dados(uploaded_file)
+    novo = extrair_dados(uploaded_file)
 
-    st.subheader(f"👤 {nome_paciente}")
-    st.write(f"📅 Data do exame: {data.strftime('%d/%m/%Y')}")
+    if not novo.empty:
+        historico = pd.concat([historico, novo]).drop_duplicates()
+        historico.to_csv(ARQUIVO_DADOS, index=False)
+        st.success("Dados adicionados!")
 
-    df = pd.DataFrame(dados)
+# =========================
+# VISUALIZAÇÃO
+# =========================
+if not historico.empty:
 
-    st.dataframe(df)
+    paciente = st.selectbox("Paciente", historico["paciente"].unique())
+    df_p = historico[historico["paciente"] == paciente]
 
-    if not df.empty:
-        exame = st.selectbox("Escolha o exame", df["exame"].unique())
+    exame = st.selectbox("Exame", df_p["exame"].unique())
+    df_f = df_p[df_p["exame"] == exame].sort_values("data")
 
-        df_f = df[df["exame"] == exame]
+    fig = px.line(df_f, x="data", y="valor", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-        plt.figure()
-        plt.plot(df_f.index, df_f["valor"], marker="o")
-        plt.title(exame)
+    st.subheader("🧠 Interpretação")
+    st.info(interpretar(df_f, exame))
 
-        st.pyplot(plt)
+    st.dataframe(df_f)
+
+else:
+    st.info("Envie exames para começar.")
