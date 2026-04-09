@@ -2,7 +2,6 @@ import streamlit as st
 import os
 from supabase import create_client
 from datetime import datetime, date
-import math
 import pandas as pd
 import pdfplumber
 import re
@@ -24,13 +23,13 @@ if "logado" not in st.session_state:
 if not st.session_state.logado:
     st.title("🔐 Login")
 
-    with st.form("login_form"):
+    with st.form("login"):
         user = st.text_input("Usuário")
         password = st.text_input("Senha", type="password")
         submitted = st.form_submit_button("Entrar")
 
         if submitted:
-            if user.strip() == USUARIO and password.strip() == SENHA:
+            if user == USUARIO and password == SENHA:
                 st.session_state.logado = True
                 st.rerun()
             else:
@@ -46,42 +45,33 @@ key = os.getenv("SUPABASE_KEY")
 supabase = create_client(url, key)
 
 # =========================
-# LIMPEZA JSON
-# =========================
-def limpar_dados(lista):
-    nova_lista = []
-    for item in lista:
-        novo = {}
-        for k, v in item.items():
-            if isinstance(v, (datetime, date)):
-                novo[k] = v.isoformat()
-            elif isinstance(v, float) and math.isnan(v):
-                novo[k] = None
-            else:
-                novo[k] = v
-        nova_lista.append(novo)
-    return nova_lista
-
-# =========================
-# EXTRAÇÃO REAL PDF
+# EXTRAÇÃO PDF (MELHORADA)
 # =========================
 def extrair_dados_pdf(file):
+
     resultados = []
+    texto = ""
 
     with pdfplumber.open(file) as pdf:
-        texto = ""
         for page in pdf.pages:
             texto += page.extract_text() + "\n"
 
-    # padrões simples (ajustamos depois com seu PDF real)
-    padrao = re.findall(r"([A-Za-z ]+)\s+([\d,.]+)\s+(mg/dL|g/dL|%)", texto)
+    # 📅 tentar pegar data do exame
+    data_match = re.search(r"(\d{2}/\d{2}/\d{4})", texto)
+    if data_match:
+        data_exame = datetime.strptime(data_match.group(1), "%d/%m/%Y").date()
+    else:
+        data_exame = date.today()
+
+    # 🧪 exames
+    padrao = re.findall(r"([A-Za-z ]+)[\.: ]+([\d,.]+)\s*(mg/dL|g/dL|%)", texto)
 
     for exame, valor, unidade in padrao:
         try:
             valor = float(valor.replace(",", "."))
             resultados.append({
                 "paciente": "Pai",
-                "data": date.today(),
+                "data": data_exame,
                 "exame": exame.strip(),
                 "valor": valor,
                 "unidade": unidade
@@ -89,20 +79,19 @@ def extrair_dados_pdf(file):
         except:
             continue
 
-    return resultados
+    return resultados, data_exame
 
 # =========================
 # BANCO
 # =========================
 def salvar_exames(lista):
-    lista_limpa = limpar_dados(lista)
-    supabase.table("exames").insert(lista_limpa).execute()
+    supabase.table("exames").insert(lista).execute()
 
-def salvar_upload(nome_arquivo):
+def salvar_upload(nome_arquivo, data_exame):
     supabase.table("uploads").insert({
         "arquivo": nome_arquivo,
         "data_envio": datetime.now().isoformat(),
-        "data_exame": date.today().isoformat()
+        "data_exame": data_exame.isoformat()
     }).execute()
 
 def carregar_exames():
@@ -118,41 +107,45 @@ def carregar_uploads():
 # =========================
 st.title("📊 Dashboard de Exames")
 
-col1, col2 = st.columns(2)
-
 # =========================
 # UPLOAD
 # =========================
-with col1:
-    st.subheader("📤 Enviar novo exame")
+st.subheader("📤 Enviar exame")
 
-    arquivo = st.file_uploader("Upload PDF", type=["pdf"])
+arquivo = st.file_uploader("Upload PDF", type=["pdf"])
 
-    if arquivo:
+if arquivo:
+
+    df_uploads = carregar_uploads()
+
+    if not df_uploads.empty and arquivo.name in df_uploads["arquivo"].values:
+        st.warning("⚠️ Este arquivo já foi enviado anteriormente")
+    else:
         if st.button("Processar exame"):
-            dados = extrair_dados_pdf(arquivo)
+
+            dados, data_exame = extrair_dados_pdf(arquivo)
 
             if not dados:
-                st.warning("Nenhum exame identificado no PDF")
+                st.error("Não foi possível identificar exames no PDF")
             else:
                 salvar_exames(dados)
-                salvar_upload(arquivo.name)
+                salvar_upload(arquivo.name, data_exame)
+
                 st.success(f"{len(dados)} exames salvos!")
                 st.rerun()
 
 # =========================
-# ÚLTIMOS UPLOADS
+# UPLOADS (FULL WIDTH)
 # =========================
-with col2:
-    st.subheader("📁 Últimos uploads")
+st.subheader("📁 Histórico de uploads")
 
-    df_up = carregar_uploads()
+df_up = carregar_uploads()
 
-    if not df_up.empty:
-        df_up = df_up.sort_values("data_envio", ascending=False)
-        st.dataframe(df_up.head(5))
-    else:
-        st.info("Nenhum upload ainda")
+if not df_up.empty:
+    df_up = df_up.sort_values("data_envio", ascending=False)
+    st.dataframe(df_up, use_container_width=True)
+else:
+    st.info("Nenhum upload ainda")
 
 # =========================
 # GRÁFICO MELHORADO
@@ -164,6 +157,7 @@ df = carregar_exames()
 if not df.empty:
 
     df["data"] = pd.to_datetime(df["data"])
+
     exames = df["exame"].unique()
 
     selecionados = st.multiselect(
@@ -175,15 +169,17 @@ if not df.empty:
     df_f = df[df["exame"].isin(selecionados)]
 
     if not df_f.empty:
+
         pivot = df_f.pivot_table(
             index="data",
             columns="exame",
             values="valor"
         )
 
-        st.line_chart(pivot)
+        st.line_chart(pivot, use_container_width=True)
 
-    st.dataframe(df.sort_values("data", ascending=False))
+        # tabela abaixo ajuda muito na leitura
+        st.dataframe(df_f.sort_values("data", ascending=False), use_container_width=True)
 
 else:
-    st.info("Nenhum exame disponível ainda")
+    st.info("Nenhum exame disponível")
