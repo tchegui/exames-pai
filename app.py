@@ -42,10 +42,15 @@ if not st.session_state.logado:
 # =========================
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
+
+if not url or not key:
+    st.error("Credenciais do Supabase não encontradas")
+    st.stop()
+
 supabase = create_client(url, key)
 
 # =========================
-# EXTRAÇÃO PDF (MELHORADA)
+# EXTRAÇÃO PDF
 # =========================
 def extrair_dados_pdf(file):
 
@@ -56,7 +61,10 @@ def extrair_dados_pdf(file):
         for page in pdf.pages:
             texto += page.extract_text() + "\n"
 
-    # 📅 tentar pegar data do exame
+    # DEBUG (pode remover depois)
+    st.text(texto[:1000])
+
+    # 📅 data do exame
     data_match = re.search(r"(\d{2}/\d{2}/\d{4})", texto)
     if data_match:
         data_exame = datetime.strptime(data_match.group(1), "%d/%m/%Y").date()
@@ -82,10 +90,36 @@ def extrair_dados_pdf(file):
     return resultados, data_exame
 
 # =========================
+# LIMPEZA JSON (FIX ERRO)
+# =========================
+def limpar_para_json(lista):
+
+    lista_limpa = []
+
+    for item in lista:
+        novo = {}
+
+        for k, v in item.items():
+
+            if isinstance(v, (datetime, date)):
+                novo[k] = v.isoformat()
+
+            elif pd.isna(v):
+                novo[k] = None
+
+            else:
+                novo[k] = v
+
+        lista_limpa.append(novo)
+
+    return lista_limpa
+
+# =========================
 # BANCO
 # =========================
 def salvar_exames(lista):
-    supabase.table("exames").insert(lista).execute()
+    lista_limpa = limpar_para_json(lista)
+    supabase.table("exames").insert(lista_limpa).execute()
 
 def salvar_upload(nome_arquivo, data_exame):
     supabase.table("uploads").insert({
@@ -135,7 +169,7 @@ if arquivo:
                 st.rerun()
 
 # =========================
-# UPLOADS (FULL WIDTH)
+# HISTÓRICO (FULL WIDTH)
 # =========================
 st.subheader("📁 Histórico de uploads")
 
@@ -148,7 +182,7 @@ else:
     st.info("Nenhum upload ainda")
 
 # =========================
-# GRÁFICO MELHORADO
+# GRÁFICO
 # =========================
 st.subheader("📈 Evolução dos exames")
 
@@ -178,8 +212,10 @@ if not df.empty:
 
         st.line_chart(pivot, use_container_width=True)
 
-        # tabela abaixo ajuda muito na leitura
-        st.dataframe(df_f.sort_values("data", ascending=False), use_container_width=True)
+        st.dataframe(
+            df_f.sort_values("data", ascending=False),
+            use_container_width=True
+        )
 
 else:
     st.info("Nenhum exame disponível")
