@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.express as px
 from supabase import create_client
 
+st.text(texto[:2000])
+
 # ================= CONFIG =================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
