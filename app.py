@@ -17,16 +17,13 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =============================
-# LOGIN (CORRIGIDO)
+# LOGIN
 # =============================
 USUARIO = "admin"
 SENHA = "1234"
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
-
-if "tentou_login" not in st.session_state:
-    st.session_state.tentou_login = False
 
 if not st.session_state.logado:
 
@@ -38,11 +35,8 @@ if not st.session_state.logado:
         submit = st.form_submit_button("Entrar")
 
     if submit:
-        st.session_state.tentou_login = True
-
         if user.strip() == USUARIO and password.strip() == SENHA:
             st.session_state.logado = True
-            st.success("Login realizado com sucesso!")
             st.rerun()
         else:
             st.error("Usuário ou senha inválidos")
@@ -52,6 +46,7 @@ if not st.session_state.logado:
 # =============================
 # FUNÇÕES
 # =============================
+
 def hash_arquivo(conteudo):
     return hashlib.md5(conteudo).hexdigest()
 
@@ -60,8 +55,23 @@ def extrair_texto(conteudo):
     texto_total = ""
     with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
         for pagina in pdf.pages:
-            texto_total += pagina.extract_text() + "\n"
+            texto = pagina.extract_text()
+            if texto:
+                texto_total += texto + "\n"
     return texto_total
+
+
+def limpar_numero(valor):
+    if not valor:
+        return None
+
+    valor = re.sub(r"[^\d,.\-]", "", valor)
+    valor = valor.replace(",", ".")
+
+    try:
+        return float(valor)
+    except:
+        return None
 
 
 def parse_pdf(texto):
@@ -69,11 +79,9 @@ def parse_pdf(texto):
 
     paciente = ""
     data_exame = None
-
     exames = []
 
     grupo = None
-
     datas_laudo = []
 
     for i, linha in enumerate(linhas):
@@ -87,7 +95,7 @@ def parse_pdf(texto):
             data_str = linha.split("Data da Ficha:")[1].strip()
             data_exame = datetime.strptime(data_str, "%d/%m/%Y").date()
 
-        # DETECTAR GRUPOS
+        # GRUPOS
         if "HEMOGRAMA" in linha:
             grupo = "Hemograma"
 
@@ -100,11 +108,14 @@ def parse_pdf(texto):
         # =============================
         # HEMOGRAMA / GASOMETRIA
         # =============================
-        match = re.match(r"([A-Za-zÇÃÉÍÓÚÔÊÕçãéíóúôêõ ]+)\s*:\s*([\d,.-]+)", linha)
+        match = re.match(r"([A-Za-zÇÃÉÍÓÚÔÊÕçãéíóúôêõ ]+)\s*:\s*([\d,.\-]+)", linha)
 
         if match and grupo in ["Hemograma", "Gasometria"]:
             nome = match.group(1).strip()
-            valor = float(match.group(2).replace(",", "."))
+            valor = limpar_numero(match.group(2))
+
+            if valor is None:
+                continue
 
             exames.append({
                 "grupo": grupo,
@@ -119,11 +130,14 @@ def parse_pdf(texto):
         # =============================
         # EXAMES SIMPLES
         # =============================
-        match2 = re.search(r"([\d,]+)\s*(mg/dL|mEq/L|mmol/L|%)", linha)
+        match2 = re.search(r"([\d,.\-]+)\s*(mg/dL|mEq/L|mmol/L|%)", linha)
 
         if match2:
-            valor = float(match2.group(1).replace(",", "."))
+            valor = limpar_numero(match2.group(1))
             unidade = match2.group(2)
+
+            if valor is None:
+                continue
 
             nome = linhas[i-2].strip() if i > 2 else "Exame"
 
@@ -148,23 +162,29 @@ def parse_pdf(texto):
                     for d in linha.split()
                 ]
 
-            elif ":" in linha and len(datas_laudo) > 0:
-                partes = linha.split()
-                nome = partes[0]
+            elif len(datas_laudo) > 0:
 
-                valores = re.findall(r"[\d,]+", linha)
+                valores = re.findall(r"[\d,.\-]+", linha)
 
-                for j, v in enumerate(valores):
-                    if j < len(datas_laudo):
-                        exames.append({
-                            "grupo": "Evolutivo",
-                            "nome_exame": nome,
-                            "valor": float(v.replace(",", ".")),
-                            "unidade": "",
-                            "ref_min": None,
-                            "ref_max": None,
-                            "data_referencia": datas_laudo[j]
-                        })
+                if len(valores) >= 2:
+                    nome = linha.split()[0]
+
+                    for j, v in enumerate(valores):
+                        valor = limpar_numero(v)
+
+                        if valor is None:
+                            continue
+
+                        if j < len(datas_laudo):
+                            exames.append({
+                                "grupo": "Evolutivo",
+                                "nome_exame": nome,
+                                "valor": valor,
+                                "unidade": "",
+                                "ref_min": None,
+                                "ref_max": None,
+                                "data_referencia": datas_laudo[j]
+                            })
 
     return paciente, data_exame, exames
 
@@ -172,6 +192,7 @@ def parse_pdf(texto):
 # =============================
 # UI
 # =============================
+
 st.title("📊 Dashboard de Exames")
 
 arquivo = st.file_uploader("Upload PDF", type="pdf")
@@ -187,7 +208,7 @@ if arquivo:
     st.write("Data:", data_exame)
     st.write("Exames extraídos:", len(exames))
 
-    # SALVAR PDF
+    # SALVAR UPLOAD
     supabase.table("uploads").upsert({
         "nome_arquivo": arquivo.name,
         "arquivo_hash": hash_arq
@@ -213,6 +234,7 @@ if arquivo:
 # =============================
 # DASHBOARD
 # =============================
+
 dados = supabase.table("exames").select("*").execute().data
 
 if dados:
@@ -229,12 +251,11 @@ if dados:
         markers=True
     )
 
-    # FAIXA DE REFERÊNCIA (visual)
+    # faixa (placeholder até extrair referência real)
     fig.add_hrect(
-        y0=df_filtrado["ref_min"].min() if df_filtrado["ref_min"].notnull().any() else 0,
-        y1=df_filtrado["ref_max"].max() if df_filtrado["ref_max"].notnull().any() else 0,
-        fillcolor="green",
-        opacity=0.1,
+        y0=df_filtrado["valor"].min(),
+        y1=df_filtrado["valor"].max(),
+        opacity=0.05,
         line_width=0,
     )
 
