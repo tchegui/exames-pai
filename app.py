@@ -12,7 +12,7 @@ import plotly.express as px
 # CONFIG
 # =============================
 SUPABASE_URL = "https://uizkcuwcraqqohfxjapw.supabase.co"
-SUPABASE_KEY = "SUA_KEY_AQUI"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpemtjdXdjcmFxcW9oZnhqYXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MjEwMDgsImV4cCI6MjA5MTI5NzAwOH0.Pm3RC19zzkatXzsaqu6wjfQQBgleZ4Od5O1mSkanTyE"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
