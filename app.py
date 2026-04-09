@@ -2,6 +2,7 @@ import streamlit as st
 import pdfplumber
 import re
 import hashlib
+import io  # ✅ FALTAVA ISSO
 from datetime import datetime
 import pandas as pd
 import plotly.express as px
