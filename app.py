@@ -17,32 +17,29 @@ USUARIO = "familia"
 SENHA = "1234"
 
 # =========================
-# SESSION INIT
+# SESSION
 # =========================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 # =========================
-# TELA LOGIN (FORMA MAIS ESTÁVEL)
+# LOGIN COM FORM (FIX)
 # =========================
 if not st.session_state.logado:
     st.title("🔐 Login")
 
-    user = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
+    with st.form("login_form"):
+        user = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        submitted = st.form_submit_button("Entrar")
 
-    if st.button("Entrar"):
-
-        # DEBUG VISÍVEL
-        st.write("DEBUG USER:", user)
-        st.write("DEBUG PASS:", password)
-
-        if user.strip() == USUARIO and password.strip() == SENHA:
-            st.session_state.logado = True
-            st.success("Login realizado!")
-            st.rerun()
-        else:
-            st.error("Usuário ou senha inválidos")
+        if submitted:
+            if user.strip() == USUARIO and password.strip() == SENHA:
+                st.session_state.logado = True
+                st.success("Login realizado!")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha inválidos")
 
     st.stop()
 
@@ -128,7 +125,7 @@ def carregar_uploads():
     return res.data if res.data else []
 
 # =========================
-# APP PRINCIPAL
+# APP
 # =========================
 st.title("📊 Exames do Paciente")
 
