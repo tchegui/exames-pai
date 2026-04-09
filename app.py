@@ -54,7 +54,7 @@ def extrair_texto_bytes(conteudo):
     return texto
 
 
-# 👤 PACIENTE CORRETO
+# 👤 PACIENTE
 def extrair_paciente(texto):
     match = re.search(r"Cliente:\s*(.+)", texto)
     if match:
@@ -62,7 +62,7 @@ def extrair_paciente(texto):
     return "Paciente"
 
 
-# 📅 DATA CORRETA
+# 📅 DATA
 def extrair_data(texto):
     match = re.search(r"Data da Ficha:.*?(\d{2}/\d{2}/\d{4})", texto)
     if match:
@@ -70,21 +70,38 @@ def extrair_data(texto):
     return None
 
 
-# 🧪 PARSER DE EXAMES (ROBUSTO)
+# 🧪 PARSER FINAL (CORRIGE “NCIA”)
 def extrair_exames(texto):
     exames = []
+    linhas = texto.split("\n")
 
-    padrao = re.findall(
-        r"([A-ZÇÃÕÁÉÍÓÚ \-/()]+)\s+(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)",
-        texto
-    )
+    nome_atual = None
 
-    for nome, valor, unidade in padrao:
-        exames.append({
-            "nome_exame": nome.strip(),
-            "valor": float(valor.replace(",", ".")),
-            "unidade": unidade
-        })
+    for linha in linhas:
+        linha = linha.strip()
+
+        # Detecta nome do exame
+        if (
+            len(linha) > 3 and
+            linha.isupper() and
+            not re.search(r"\d", linha) and
+            "REFER" not in linha and
+            "MATERIAL" not in linha and
+            "INTERVALO" not in linha
+        ):
+            nome_atual = linha
+            continue
+
+        # Detecta valor
+        match = re.search(r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)", linha)
+
+        if match and nome_atual:
+            exames.append({
+                "nome_exame": nome_atual.strip(),
+                "valor": float(match.group(1).replace(",", ".")),
+                "unidade": match.group(2)
+            })
+            nome_atual = None
 
     return exames
 
@@ -132,8 +149,7 @@ if arquivo:
     else:
         texto = extrair_texto_bytes(conteudo)
 
-        # DEBUG (pode remover depois)
-        with st.expander("🔍 Texto extraído"):
+        with st.expander("🔍 Texto extraído (debug)"):
             st.text(texto[:2000])
 
         dados = {
@@ -170,11 +186,11 @@ if dados_db:
         df_f,
         x="data_exame",
         y="valor",
-        markers=True  # ✅ resolve seu problema do gráfico
+        markers=True
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
     st.dataframe(df_f)
+
 else:
     st.info("Nenhum exame ainda salvo.")
