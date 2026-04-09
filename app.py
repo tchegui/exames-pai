@@ -39,11 +39,9 @@ def extrair_dados(pdf_file):
 
     # REGEX PRINCIPAL
     padrao = re.findall(
-        r'([A-ZÁÉÍÓÚÇ\s,]+)\s*\n.*?RESULTADO.*?([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
-        texto,
-        re.DOTALL
-    )
-
+    r'([A-ZÁÉÍÓÚÇ\s,]+)\n(?:.*\n){0,5}?RESULTADO\s*\n\s*([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
+    texto
+)
     for nome, valor, unidade in padrao:
         nome_limpo = nome.strip()
 
