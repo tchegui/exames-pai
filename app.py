@@ -1,245 +1,232 @@
 import streamlit as st
 import pdfplumber
+import io
 import re
 import hashlib
-import io
 from datetime import datetime
+from supabase import create_client
 import pandas as pd
 import plotly.express as px
-from supabase import create_client
 
-# ================= DEBUG MODE =================
-modo_debug = st.sidebar.checkbox("🔎 Modo diagnóstico PDF")
-
-if modo_debug:
-    import pdfplumber, io
-
-    st.title("🔎 INSPEÇÃO DE PDF (DEBUG)")
-
-    arquivo = st.file_uploader("Envie o PDF para análise", type="pdf")
-
-    if arquivo:
-        conteudo = arquivo.read()
-
-        with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
-            for i, pagina in enumerate(pdf.pages):
-                texto = pagina.extract_text()
-
-                st.markdown("---")
-                st.subheader(f"📄 Página {i+1}")
-
-                if texto:
-                    linhas = texto.split("\n")
-
-                    for idx, linha in enumerate(linhas):
-                        st.text(f"{idx:03d} | {linha}")
-                else:
-                    st.warning("⚠️ Página sem texto extraído")
-
-    st.stop()
-
-# ================= CONFIG =================
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+# =============================
+# CONFIG
+# =============================
+SUPABASE_URL = "SUA_URL"
+SUPABASE_KEY = "SUA_KEY"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ================= LOGIN =================
+# =============================
+# LOGIN
+# =============================
+USUARIO = "admin"
+SENHA = "1234"
+
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-
     st.title("🔐 Login")
 
-    with st.form("login_form"):
-        usuario = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-        entrar = st.form_submit_button("Entrar")
+    user = st.text_input("Usuário")
+    password = st.text_input("Senha", type="password")
 
-        if entrar:
-            if usuario.strip() == "admin" and senha.strip() == "123":
-                st.session_state.logado = True
-                st.rerun()
-            else:
-                st.error("Usuário ou senha inválidos")
+    if st.button("Entrar"):
+        if user == USUARIO and password == SENHA:
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Usuário ou senha inválidos")
 
     st.stop()
 
-st.sidebar.button(
-    "Logout",
-    on_click=lambda: st.session_state.update({"logado": False})
-)
-
-# ================= FUNÇÕES =================
-
-def gerar_hash(arquivo):
-    conteudo = arquivo.read()
-    arquivo.seek(0)
-    return hashlib.md5(conteudo).hexdigest(), conteudo
+# =============================
+# FUNÇÕES
+# =============================
+def hash_arquivo(conteudo):
+    return hashlib.md5(conteudo).hexdigest()
 
 
-def extrair_texto_bytes(conteudo):
-    texto = ""
+def extrair_texto(conteudo):
+    texto_total = ""
     with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
-        for p in pdf.pages:
-            t = p.extract_text()
-            if t:
-                texto += t + "\n"
-    return texto
+        for pagina in pdf.pages:
+            texto_total += pagina.extract_text() + "\n"
+    return texto_total
 
 
-def extrair_paciente(texto):
-    match = re.search(r"Cliente:\s*(.+)", texto)
-    if match:
-        return match.group(1).strip()
-    return "Paciente"
-
-
-def extrair_data(texto):
-    match = re.search(r"Data da Ficha:.*?(\d{2}/\d{2}/\d{4})", texto)
-    if match:
-        return datetime.strptime(match.group(1), "%d/%m/%Y").date()
-    return None
-
-
-# 🔥 PARSER FINAL PROFISSIONAL
-def extrair_exames(texto):
-    exames = []
+def parse_pdf(texto):
     linhas = texto.split("\n")
 
-    nome_atual = None
+    paciente = ""
+    data_exame = None
 
-    for linha in linhas:
-        linha = linha.strip()
+    exames = []
 
-        # IGNORAR LIXO
-        if (
-            linha == "" or
-            "===" in linha or
-            "RESULTADO" in linha or
-            "RESULTADOS" in linha or
-            "MATERIAL" in linha or
-            "REFER" in linha or
-            "INTERVALO" in linha or
-            len(linha) < 3
-        ):
-            continue
+    grupo = None
 
-        # LIMPAR LINHA
-        linha = re.sub(r"=+", "", linha).strip()
+    datas_laudo = []
 
-        # DETECTAR NOME DO EXAME
-        if (
-            linha.isupper() and
-            not re.search(r"\d", linha) and
-            len(linha) < 60
-        ):
-            nome_atual = linha
-            continue
+    for i, linha in enumerate(linhas):
 
-        # DETECTAR VALOR
-        match = re.search(
-            r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)",
-            linha
-        )
+        # PACIENTE
+        if "Cliente:" in linha:
+            paciente = linha.split("Cliente:")[1].strip()
 
-        if match and nome_atual:
+        # DATA CORRETA
+        if "Data da Ficha:" in linha:
+            data_str = linha.split("Data da Ficha:")[1].strip()
+            data_exame = datetime.strptime(data_str, "%d/%m/%Y").date()
+
+        # DETECTAR GRUPOS
+        if "HEMOGRAMA" in linha:
+            grupo = "Hemograma"
+
+        elif "GASOMETRIA ARTERIAL" in linha:
+            grupo = "Gasometria"
+
+        elif "LAUDO EVOLUTIVO" in linha:
+            grupo = "Evolutivo"
+
+        # =============================
+        # HEMOGRAMA / GASOMETRIA
+        # =============================
+        match = re.match(r"([A-Za-zÇÃÉÍÓÚÔÊÕçãéíóúôêõ ]+)\s*:\s*([\d,.-]+)", linha)
+
+        if match and grupo in ["Hemograma", "Gasometria"]:
+            nome = match.group(1).strip()
+            valor = float(match.group(2).replace(",", "."))
+
             exames.append({
-                "nome_exame": nome_atual,
-                "valor": float(match.group(1).replace(",", ".")),
-                "unidade": match.group(2)
+                "grupo": grupo,
+                "nome_exame": nome,
+                "valor": valor,
+                "unidade": "",
+                "ref_min": None,
+                "ref_max": None,
+                "data_referencia": data_exame
             })
-            nome_atual = None
 
-    return exames
+        # =============================
+        # EXAMES SIMPLES
+        # =============================
+        match2 = re.search(r"([\d,]+)\s*(mg/dL|mEq/L|mmol/L|%)", linha)
+
+        if match2:
+            valor = float(match2.group(1).replace(",", "."))
+            unidade = match2.group(2)
+
+            nome = linhas[i-2].strip() if i > 2 else "Exame"
+
+            exames.append({
+                "grupo": "Simples",
+                "nome_exame": nome,
+                "valor": valor,
+                "unidade": unidade,
+                "ref_min": None,
+                "ref_max": None,
+                "data_referencia": data_exame
+            })
+
+        # =============================
+        # LAUDO EVOLUTIVO
+        # =============================
+        if grupo == "Evolutivo":
+
+            if re.match(r"\d{2}/\d{2}/\d{4}", linha):
+                datas_laudo = [
+                    datetime.strptime(d, "%d/%m/%Y").date()
+                    for d in linha.split()
+                ]
+
+            elif ":" in linha and len(datas_laudo) > 0:
+                partes = linha.split()
+                nome = partes[0]
+
+                valores = re.findall(r"[\d,]+", linha)
+
+                for j, v in enumerate(valores):
+                    if j < len(datas_laudo):
+                        exames.append({
+                            "grupo": "Evolutivo",
+                            "nome_exame": nome,
+                            "valor": float(v.replace(",", ".")),
+                            "unidade": "",
+                            "ref_min": None,
+                            "ref_max": None,
+                            "data_referencia": datas_laudo[j]
+                        })
+
+    return paciente, data_exame, exames
 
 
-def salvar_upload(paciente, data, hash_arquivo, nome):
-    supabase.table("uploads").insert({
-        "paciente": paciente,
-        "data_exame": str(data) if data else None,
-        "arquivo_hash": hash_arquivo,
-        "nome_arquivo": nome
+# =============================
+# UI
+# =============================
+st.title("📊 Dashboard de Exames")
+
+arquivo = st.file_uploader("Upload PDF", type="pdf")
+
+if arquivo:
+    conteudo = arquivo.read()
+    hash_arq = hash_arquivo(conteudo)
+
+    texto = extrair_texto(conteudo)
+    paciente, data_exame, exames = parse_pdf(texto)
+
+    st.write("Paciente:", paciente)
+    st.write("Data:", data_exame)
+    st.write("Exames extraídos:", len(exames))
+
+    # SALVAR PDF
+    supabase.table("uploads").upsert({
+        "nome_arquivo": arquivo.name,
+        "arquivo_hash": hash_arq
     }).execute()
 
-
-def salvar_exames(dados, hash_arquivo):
-    lista = []
-
-    for ex in dados["exames"]:
-        lista.append({
-            "paciente": dados["paciente"],
-            "data_exame": str(dados["data"]) if dados["data"] else None,
+    # SALVAR EXAMES
+    for ex in exames:
+        supabase.table("exames").upsert({
+            "paciente": paciente,
+            "data_exame": data_exame,
+            "grupo": ex["grupo"],
             "nome_exame": ex["nome_exame"],
             "valor": ex["valor"],
             "unidade": ex["unidade"],
-            "arquivo_hash": hash_arquivo
-        })
+            "ref_min": ex["ref_min"],
+            "ref_max": ex["ref_max"],
+            "data_referencia": ex["data_referencia"],
+            "arquivo_hash": hash_arq
+        }).execute()
 
-    if lista:
-        supabase.table("exames").insert(lista).execute()
+    st.success("Dados salvos!")
 
+# =============================
+# DASHBOARD
+# =============================
+dados = supabase.table("exames").select("*").execute().data
 
-# ================= UI =================
+if dados:
+    df = pd.DataFrame(dados)
 
-st.title("📊 Dashboard de Exames")
+    exame_escolhido = st.selectbox("Escolha o exame", df["nome_exame"].unique())
 
-arquivo = st.file_uploader("Envie o PDF", type="pdf")
-
-if arquivo:
-
-    hash_arquivo, conteudo = gerar_hash(arquivo)
-
-    existe = supabase.table("uploads").select("*").eq("arquivo_hash", hash_arquivo).execute()
-
-    if existe.data:
-        st.warning("⚠️ Esse arquivo já foi enviado.")
-    else:
-        texto = extrair_texto_bytes(conteudo)
-
-        with st.expander("🔍 Texto extraído (debug)"):
-            st.text(texto[:2000])
-
-        dados = {
-            "paciente": extrair_paciente(texto),
-            "data": extrair_data(texto),
-            "exames": extrair_exames(texto)
-        }
-
-        st.subheader("📋 Dados extraídos")
-        st.json(dados)
-
-        if st.button("💾 Salvar no banco"):
-            salvar_upload(dados["paciente"], dados["data"], hash_arquivo, arquivo.name)
-            salvar_exames(dados, hash_arquivo)
-            st.success("✅ Dados salvos com sucesso!")
-
-# ================= DASHBOARD =================
-
-st.divider()
-st.subheader("📈 Evolução dos Exames")
-
-dados_db = supabase.table("exames").select("*").execute().data
-
-if dados_db:
-    df = pd.DataFrame(dados_db)
-
-    df["data_exame"] = pd.to_datetime(df["data_exame"])
-
-    exame = st.selectbox("Selecione o exame", df["nome_exame"].unique())
-
-    df_f = df[df["nome_exame"] == exame].sort_values("data_exame")
+    df_filtrado = df[df["nome_exame"] == exame_escolhido]
 
     fig = px.line(
-        df_f,
-        x="data_exame",
+        df_filtrado,
+        x="data_referencia",
         y="valor",
         markers=True
     )
 
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df_f)
+    # FAIXA DE REFERÊNCIA (visual)
+    fig.add_hrect(
+        y0=df_filtrado["ref_min"].min() if df_filtrado["ref_min"].notnull().any() else 0,
+        y1=df_filtrado["ref_max"].max() if df_filtrado["ref_max"].notnull().any() else 0,
+        fillcolor="green",
+        opacity=0.1,
+        line_width=0,
+    )
 
-else:
-    st.info("Nenhum exame ainda salvo.")
+    st.plotly_chart(fig)
