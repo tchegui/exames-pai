@@ -4,9 +4,14 @@ import pandas as pd
 import re
 from datetime import datetime
 import plotly.express as px
-import os
+from supabase import create_client
 
-st.set_page_config(layout="wide")
+# =========================
+# CONEXÃO SUPABASE
+# =========================
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
 # =========================
 # LOGIN
@@ -20,11 +25,11 @@ if "logado" not in st.session_state:
 if not st.session_state.logado:
     st.title("🔐 Login")
 
-    user = st.text_input("Usuário")
-    pwd = st.text_input("Senha", type="password")
+    u = st.text_input("Usuário")
+    s = st.text_input("Senha", type="password")
 
     if st.button("Entrar"):
-        if user == USUARIO and pwd == SENHA:
+        if u == USUARIO and s == SENHA:
             st.session_state.logado = True
             st.rerun()
         else:
@@ -32,34 +37,15 @@ if not st.session_state.logado:
 
     st.stop()
 
-# =========================
-# ARQUIVOS
-# =========================
-ARQ_DADOS = "historico_exames.csv"
-ARQ_UPLOADS = "uploads.csv"
-
-# =========================
-# CARREGAR
-# =========================
-if os.path.exists(ARQ_DADOS):
-    historico = pd.read_csv(ARQ_DADOS, parse_dates=["data"])
-else:
-    historico = pd.DataFrame(columns=["paciente", "data", "exame", "valor", "unidade"])
-
-if os.path.exists(ARQ_UPLOADS):
-    uploads = pd.read_csv(ARQ_UPLOADS, parse_dates=["data_envio", "data_exame"])
-else:
-    uploads = pd.DataFrame(columns=["arquivo", "data_envio", "data_exame"])
+st.title("📊 Monitor de Exames")
 
 # =========================
 # PADRONIZAÇÃO
 # =========================
-MAPA_EXAMES = {
+MAPA = {
     "HEMOGLOBINA": "HEMOGLOBINA",
     "LEUCÓCITOS": "LEUCOCITOS",
     "PLAQUETAS": "PLAQUETAS",
-    "POTASSIO": "POTASSIO",
-    "SODIO": "SODIO",
     "PROTEINA C-REATIVA": "PCR",
 }
 
@@ -69,11 +55,11 @@ LIMITES = {
     "PCR": (0, 0.5),
 }
 
-def normalizar(nome):
+def norm(nome):
     nome = nome.upper()
-    for k in MAPA_EXAMES:
+    for k in MAPA:
         if k in nome:
-            return MAPA_EXAMES[k]
+            return MAPA[k]
     return nome
 
 # =========================
@@ -94,7 +80,6 @@ def extrair(pdf):
     dados = []
 
     for l in linhas:
-
         if "OBERON" in l.upper():
             paciente = l.strip()
 
@@ -104,107 +89,83 @@ def extrair(pdf):
                 data = datetime.strptime(m.group(1), "%d/%m/%Y")
 
         match = re.search(
-            r'([A-ZÇÃÉÍÓÚ\s]+?)\s*[:]\s*([\d\.,]+)\s*(mg/dL|mEq/L|mmol/L|g/dL|U/L|%|mmHg|/mm3)',
+            r'([A-ZÇÃÉÍÓÚ\s]+?)\s*[:]\s*([\d\.,]+)\s*(mg/dL|mEq/L|g/dL|%)',
             l
         )
 
         if match:
-            nome = normalizar(match.group(1))
-            valor = float(match.group(2).replace(".", "").replace(",", "."))
-            unidade = match.group(3)
-
             dados.append({
                 "paciente": paciente,
-                "data": data,
-                "exame": nome,
-                "valor": valor,
-                "unidade": unidade
+                "data": data.date(),
+                "exame": norm(match.group(1)),
+                "valor": float(match.group(2).replace(".", "").replace(",", ".")),
+                "unidade": match.group(3)
             })
 
-    return pd.DataFrame(dados), data
+    return dados, data.date()
 
 # =========================
-# INTERPRETAÇÃO
+# SALVAR NO BANCO
 # =========================
-def interpretar(df, exame):
-    if exame not in LIMITES or len(df) < 1:
-        return "Sem interpretação"
+def salvar_exames(lista):
+    supabase.table("exames").insert(lista).execute()
 
-    min_v, max_v = LIMITES[exame]
-    atual = df.iloc[-1]["valor"]
+def salvar_upload(nome, data_exame):
+    supabase.table("uploads").insert({
+        "arquivo": nome,
+        "data_envio": datetime.now().isoformat(),
+        "data_exame": data_exame
+    }).execute()
 
-    texto = ""
+# =========================
+# CARREGAR DO BANCO
+# =========================
+def carregar_exames():
+    res = supabase.table("exames").select("*").execute()
+    return pd.DataFrame(res.data)
 
-    if atual < min_v:
-        texto += "🔴 Baixo. "
-    elif atual > max_v:
-        texto += "🔴 Alto. "
-    else:
-        texto += "🟢 Normal. "
-
-    if len(df) >= 2:
-        anterior = df.iloc[-2]["valor"]
-        if atual > anterior:
-            texto += "📈 Subindo."
-        elif atual < anterior:
-            texto += "📉 Caindo."
-
-    return texto
+def carregar_uploads():
+    res = supabase.table("uploads").select("*").execute()
+    return pd.DataFrame(res.data)
 
 # =========================
 # UPLOAD
 # =========================
-st.subheader("📤 Enviar novo exame")
+st.subheader("📤 Enviar exame")
 
-arquivo = st.file_uploader("PDF", type="pdf")
+file = st.file_uploader("PDF", type="pdf")
 
-if arquivo:
-    df_novo, data_exame = extrair(arquivo)
+if file:
+    dados, data_exame = extrair(file)
 
-    if not df_novo.empty:
+    if dados:
+        salvar_exames(dados)
+        salvar_upload(file.name, data_exame)
 
-        historico = pd.concat([historico, df_novo]).drop_duplicates()
-        historico.to_csv(ARQ_DADOS, index=False)
-
-        novo_upload = pd.DataFrame([{
-            "arquivo": arquivo.name,
-            "data_envio": datetime.now(),
-            "data_exame": data_exame
-        }])
-
-        uploads = pd.concat([uploads, novo_upload])
-        uploads.to_csv(ARQ_UPLOADS, index=False)
-
-        st.success("Exame adicionado!")
+        st.success("Salvo no banco!")
         st.rerun()
 
 # =========================
-# DASHBOARD AUTOMÁTICO
+# DASHBOARD
 # =========================
-if not historico.empty:
+df = carregar_exames()
 
-    paciente = historico["paciente"].iloc[0]
+if not df.empty:
 
-    exames = historico["exame"].unique()
-    exame = st.selectbox("🧪 Exame", exames)
-
-    df_f = historico[historico["exame"] == exame].sort_values("data")
+    exame = st.selectbox("Exame", df["exame"].unique())
+    df_f = df[df["exame"] == exame].sort_values("data")
 
     fig = px.line(df_f, x="data", y="valor", markers=True)
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("🧠 Interpretação")
-    st.info(interpretar(df_f, exame))
-
     st.subheader("📋 Histórico")
-    st.dataframe(df_f.sort_values("data", ascending=False))
+    st.dataframe(df_f)
 
 # =========================
-# LISTA DE PDFs
+# UPLOADS
 # =========================
-if not uploads.empty:
+up = carregar_uploads()
+
+if not up.empty:
     st.subheader("📁 PDFs enviados")
-
-    st.dataframe(
-        uploads.sort_values("data_envio", ascending=False)
-    )
+    st.dataframe(up.sort_values("data_envio", ascending=False))
