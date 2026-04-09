@@ -18,20 +18,32 @@ def extrair_dados(pdf_file):
 
     dados = []
 
-    # PEGAR NOME DO PACIENTE
+    # =========================
+    # NOME DO PACIENTE
+    # =========================
     nome_match = re.search(r'\n([A-Z\s]+)\n\d{2}/\d{2}/\d{4}', texto)
 
-if not nome_match:
-    nome_match = re.search(r'\n([A-Z\s]{10,})\n', texto)
+    if not nome_match:
+        nome_match = re.search(r'\n([A-Z\s]{10,})\n', texto)
 
-nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
-    nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
+    if nome_match:
+        nome_paciente = nome_match.group(1).strip()
+    else:
+        nome_paciente = "Paciente"
 
-    # PEGAR DATA
+    # =========================
+    # DATA DO EXAME
+    # =========================
     data_match = re.search(r'COLETADO EM: (\d{2}/\d{2}/\d{4})', texto)
-    data = datetime.strptime(data_match.group(1), "%d/%m/%Y") if data_match else datetime.now()
 
+    if data_match:
+        data = datetime.strptime(data_match.group(1), "%d/%m/%Y")
+    else:
+        data = datetime.now()
+
+    # =========================
     # EXAMES QUE QUEREMOS
+    # =========================
     EXAMES_VALIDOS = [
         "PROTEINA C-REATIVA",
         "ACIDO LACTICO",
@@ -42,11 +54,14 @@ nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
         "CREATININA"
     ]
 
-    # REGEX PRINCIPAL
+    # =========================
+    # REGEX PRINCIPAL (ROBUSTO)
+    # =========================
     padrao = re.findall(
-    r'([A-ZÁÉÍÓÚÇ\s,]+)\n(?:.*\n){0,5}?RESULTADO\s*\n\s*([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
-    texto
-)
+        r'([A-ZÁÉÍÓÚÇ\s,]+)\n(?:.*\n){0,5}?RESULTADO\s*\n\s*([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
+        texto
+    )
+
     for nome, valor, unidade in padrao:
         nome_limpo = nome.strip()
 
@@ -57,7 +72,9 @@ nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
                 "unidade": unidade
             })
 
+    # =========================
     # GASOMETRIA
+    # =========================
     gasometria = re.findall(
         r'(pH|pO2|pCO2|HCO3|BE|SO2)\s*:\s*([\d,\.]+)',
         texto
@@ -73,6 +90,9 @@ nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
     return dados, data, nome_paciente
 
 
+# =========================
+# INTERFACE
+# =========================
 if uploaded_file:
     dados, data, nome_paciente = extrair_dados(uploaded_file)
 
