@@ -20,6 +20,11 @@ def extrair_dados(pdf_file):
 
     # PEGAR NOME DO PACIENTE
     nome_match = re.search(r'\n([A-Z\s]+)\n\d{2}/\d{2}/\d{4}', texto)
+
+if not nome_match:
+    nome_match = re.search(r'\n([A-Z\s]{10,})\n', texto)
+
+nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
     nome_paciente = nome_match.group(1).strip() if nome_match else "Paciente"
 
     # PEGAR DATA
