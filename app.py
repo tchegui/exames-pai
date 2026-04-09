@@ -22,18 +22,22 @@ if not st.session_state.logado:
 
     st.title("🔐 Login")
 
-    usuario = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
+    with st.form("login_form"):
+        usuario = st.text_input("Usuário")
+        senha = st.text_input("Senha", type="password")
+        entrar = st.form_submit_button("Entrar")
 
-    if st.button("Entrar"):
-        if usuario == "admin" and senha == "123":
-            st.session_state.logado = True
-            st.rerun()
-        else:
-            st.error("Usuário ou senha inválidos")
+        if entrar:
+            if usuario.strip() == "admin" and senha.strip() == "123":
+                st.session_state.logado = True
+                st.success("Login realizado!")
+                st.rerun()
+            else:
+                st.error(f"Usuário ou senha inválidos → ({usuario} / {senha})")
 
     st.stop()
 
+# LOGOUT
 st.sidebar.button(
     "Logout",
     on_click=lambda: st.session_state.update({"logado": False})
@@ -80,7 +84,6 @@ def extrair_exames(texto):
     for linha in linhas:
         linha = linha.strip()
 
-        # Detecta nome do exame
         if (
             len(linha) > 3 and
             linha.isupper() and
@@ -92,7 +95,6 @@ def extrair_exames(texto):
             nome_atual = linha
             continue
 
-        # Detecta valor
         match = re.search(r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)", linha)
 
         if match and nome_atual:
