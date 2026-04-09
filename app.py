@@ -17,7 +17,7 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =============================
-# LOGIN
+# LOGIN (CORRIGIDO)
 # =============================
 USUARIO = "admin"
 SENHA = "1234"
@@ -25,15 +25,24 @@ SENHA = "1234"
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
+if "tentou_login" not in st.session_state:
+    st.session_state.tentou_login = False
+
 if not st.session_state.logado:
+
     st.title("🔐 Login")
 
-    user = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
+    with st.form("login_form"):
+        user = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        submit = st.form_submit_button("Entrar")
 
-    if st.button("Entrar"):
-        if user == USUARIO and password == SENHA:
+    if submit:
+        st.session_state.tentou_login = True
+
+        if user.strip() == USUARIO and password.strip() == SENHA:
             st.session_state.logado = True
+            st.success("Login realizado com sucesso!")
             st.rerun()
         else:
             st.error("Usuário ou senha inválidos")
