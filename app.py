@@ -12,7 +12,7 @@ import plotly.express as px
 # CONFIG
 # =============================
 SUPABASE_URL = "https://uizkcuwcraqqohfxjapw.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpemtjdXdjcmFxcW9oZnhqYXB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MjEwMDgsImV4cCI6MjA5MTI5NzAwOH0.Pm3RC19zzkatXzsaqu6wjfQQBgleZ4Od5O1mSkanTyE"
+SUPABASE_KEY = "SUA_KEY_AQUI"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -26,7 +26,6 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-
     st.title("🔐 Login")
 
     with st.form("login_form"):
@@ -64,10 +63,8 @@ def extrair_texto(conteudo):
 def limpar_numero(valor):
     if not valor:
         return None
-
     valor = re.sub(r"[^\d,.\-]", "", valor)
     valor = valor.replace(",", ".")
-
     try:
         return float(valor)
     except:
@@ -90,10 +87,13 @@ def parse_pdf(texto):
         if "Cliente:" in linha:
             paciente = linha.split("Cliente:")[1].strip()
 
-        # DATA CORRETA
+        # DATA
         if "Data da Ficha:" in linha:
             data_str = linha.split("Data da Ficha:")[1].strip()
-            data_exame = datetime.strptime(data_str, "%d/%m/%Y").date()
+            try:
+                data_exame = datetime.strptime(data_str, "%d/%m/%Y").date()
+            except:
+                pass
 
         # GRUPOS
         if "HEMOGRAMA" in linha:
@@ -206,30 +206,42 @@ if arquivo:
 
     st.write("Paciente:", paciente)
     st.write("Data:", data_exame)
-    st.write("Exames extraídos:", len(exames))
+    st.write("Total exames:", len(exames))
 
     # SALVAR UPLOAD
-    supabase.table("uploads").upsert({
-        "nome_arquivo": arquivo.name,
-        "arquivo_hash": hash_arq
-    }).execute()
-
-    # SALVAR EXAMES
-    for ex in exames:
-        supabase.table("exames").upsert({
-            "paciente": paciente,
-            "data_exame": data_exame,
-            "grupo": ex["grupo"],
-            "nome_exame": ex["nome_exame"],
-            "valor": ex["valor"],
-            "unidade": ex["unidade"],
-            "ref_min": ex["ref_min"],
-            "ref_max": ex["ref_max"],
-            "data_referencia": ex["data_referencia"],
+    try:
+        supabase.table("uploads").insert({
+            "nome_arquivo": arquivo.name,
             "arquivo_hash": hash_arq
         }).execute()
+    except Exception as e:
+        st.error(f"Erro upload: {e}")
 
-    st.success("Dados salvos!")
+    # SALVAR EXAMES (VERSÃO CORRIGIDA)
+    for ex in exames:
+
+        registro = {
+            "paciente": str(paciente) if paciente else "",
+            "data_exame": str(data_exame) if data_exame else None,
+            "grupo": str(ex.get("grupo", "")),
+            "nome_exame": str(ex.get("nome_exame", ""))[:100],
+            "valor": float(ex["valor"]) if ex.get("valor") is not None else None,
+            "unidade": str(ex.get("unidade", "")),
+            "ref_min": ex.get("ref_min"),
+            "ref_max": ex.get("ref_max"),
+            "data_referencia": str(ex.get("data_referencia")) if ex.get("data_referencia") else None,
+            "arquivo_hash": hash_arq
+        }
+
+        try:
+            supabase.table("exames").insert(registro).execute()
+        except Exception as e:
+            st.error("ERRO AO INSERIR:")
+            st.write(registro)
+            st.error(e)
+            break
+
+    st.success("Processado!")
 
 # =============================
 # DASHBOARD
@@ -249,14 +261,6 @@ if dados:
         x="data_referencia",
         y="valor",
         markers=True
-    )
-
-    # faixa (placeholder até extrair referência real)
-    fig.add_hrect(
-        y0=df_filtrado["valor"].min(),
-        y1=df_filtrado["valor"].max(),
-        opacity=0.05,
-        line_width=0,
     )
 
     st.plotly_chart(fig)
