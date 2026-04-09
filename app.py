@@ -11,26 +11,31 @@ import pandas as pd
 st.set_page_config(page_title="Exames", layout="wide")
 
 # =========================
-# LOGIN SIMPLES
+# LOGIN
 # =========================
 USUARIO = "familia"
 SENHA = "1234"
 
 if "logado" not in st.session_state:
-    st.session_state.logado = False
+    st.session_state["logado"] = False
 
-if not st.session_state.logado:
-    st.title("Login")
+def fazer_login():
+    user = st.session_state.get("user", "").strip()
+    password = st.session_state.get("password", "").strip()
 
-    user = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
+    if user == USUARIO and password == SENHA:
+        st.session_state["logado"] = True
+    else:
+        st.session_state["logado"] = False
+        st.error("Usuário ou senha inválidos")
 
-    if st.button("Entrar"):
-        if user == USUARIO and password == SENHA:
-            st.session_state.logado = True
-            st.rerun()
-        else:
-            st.error("Usuário ou senha inválidos")
+if not st.session_state["logado"]:
+    st.title("🔐 Login")
+
+    st.text_input("Usuário", key="user")
+    st.text_input("Senha", type="password", key="password")
+
+    st.button("Entrar", on_click=fazer_login)
 
     st.stop()
 
@@ -43,7 +48,7 @@ key = os.getenv("SUPABASE_KEY")
 supabase = create_client(url, key)
 
 # =========================
-# FUNÇÃO LIMPEZA (resolve erro JSON)
+# LIMPEZA JSON
 # =========================
 def limpar_dados(lista):
     nova_lista = []
@@ -70,10 +75,9 @@ def limpar_dados(lista):
     return nova_lista
 
 # =========================
-# EXTRAÇÃO SIMPLES (mock)
+# EXTRAÇÃO (SIMPLES POR ENQUANTO)
 # =========================
 def extrair_dados_pdf(nome_arquivo):
-    # Simulação — depois podemos ler PDF de verdade
     return [
         {
             "paciente": "Pai",
@@ -92,7 +96,7 @@ def extrair_dados_pdf(nome_arquivo):
     ]
 
 # =========================
-# SALVAR NO BANCO
+# SALVAR
 # =========================
 def salvar_exames(lista):
     lista_limpa = limpar_dados(lista)
@@ -106,7 +110,7 @@ def salvar_upload(nome_arquivo):
     }).execute()
 
 # =========================
-# BUSCAR DADOS
+# CARREGAR
 # =========================
 def carregar_exames():
     res = supabase.table("exames").select("*").execute()
@@ -139,7 +143,7 @@ if arquivo:
         st.rerun()
 
 # =========================
-# DADOS
+# HISTÓRICO
 # =========================
 st.subheader("📈 Histórico de exames")
 
@@ -150,9 +154,16 @@ if dados:
 
     st.dataframe(df)
 
-    # gráfico simples
-    if "valor" in df.columns:
-        st.line_chart(df["valor"])
+    # gráfico por exame
+    exames = df["exame"].unique()
+
+    exame_sel = st.selectbox("Escolha o exame", exames)
+
+    df_f = df[df["exame"] == exame_sel]
+
+    df_f = df_f.sort_values("data")
+
+    st.line_chart(df_f.set_index("data")["valor"])
 
 else:
     st.info("Nenhum exame encontrado")
