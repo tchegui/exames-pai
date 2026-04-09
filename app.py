@@ -18,23 +18,26 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
-def login():
+if not st.session_state.logado:
+
     st.title("🔐 Login")
-    user = st.text_input("Usuário")
+
+    usuario = st.text_input("Usuário")
     senha = st.text_input("Senha", type="password")
 
     if st.button("Entrar"):
-        if user == "admin" and senha == "123":
+        if usuario == "admin" and senha == "123":
             st.session_state.logado = True
             st.rerun()
         else:
             st.error("Usuário ou senha inválidos")
 
-if not st.session_state.logado:
-    login()
     st.stop()
 
-st.sidebar.button("Logout", on_click=lambda: st.session_state.update({"logado": False}))
+st.sidebar.button(
+    "Logout",
+    on_click=lambda: st.session_state.update({"logado": False})
+)
 
 # ================= FUNÇÕES =================
 
@@ -54,7 +57,6 @@ def extrair_texto_bytes(conteudo):
     return texto
 
 
-# 👤 PACIENTE
 def extrair_paciente(texto):
     match = re.search(r"Cliente:\s*(.+)", texto)
     if match:
@@ -62,7 +64,6 @@ def extrair_paciente(texto):
     return "Paciente"
 
 
-# 📅 DATA
 def extrair_data(texto):
     match = re.search(r"Data da Ficha:.*?(\d{2}/\d{2}/\d{4})", texto)
     if match:
@@ -70,7 +71,6 @@ def extrair_data(texto):
     return None
 
 
-# 🧪 PARSER FINAL (CORRIGE “NCIA”)
 def extrair_exames(texto):
     exames = []
     linhas = texto.split("\n")
