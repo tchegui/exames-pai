@@ -8,6 +8,36 @@ import pandas as pd
 import plotly.express as px
 from supabase import create_client
 
+# ================= DEBUG MODE =================
+modo_debug = st.sidebar.checkbox("🔎 Modo diagnóstico PDF")
+
+if modo_debug:
+    import pdfplumber, io
+
+    st.title("🔎 INSPEÇÃO DE PDF (DEBUG)")
+
+    arquivo = st.file_uploader("Envie o PDF para análise", type="pdf")
+
+    if arquivo:
+        conteudo = arquivo.read()
+
+        with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
+            for i, pagina in enumerate(pdf.pages):
+                texto = pagina.extract_text()
+
+                st.markdown("---")
+                st.subheader(f"📄 Página {i+1}")
+
+                if texto:
+                    linhas = texto.split("\n")
+
+                    for idx, linha in enumerate(linhas):
+                        st.text(f"{idx:03d} | {linha}")
+                else:
+                    st.warning("⚠️ Página sem texto extraído")
+
+    st.stop()
+
 # ================= CONFIG =================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
