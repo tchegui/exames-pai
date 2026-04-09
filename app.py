@@ -16,61 +16,57 @@ def extrair_dados(pdf_file):
         for page in pdf.pages:
             texto += page.extract_text() + "\n"
 
+    linhas = texto.split("\n")
     dados = []
 
-    # =========================
-    # NOME DO PACIENTE
-    # =========================
-    nome_match = re.search(r'\n([A-Z\s]+)\n\d{2}/\d{2}/\d{4}', texto)
-
-    if not nome_match:
-        nome_match = re.search(r'\n([A-Z\s]{10,})\n', texto)
-
-    if nome_match:
-        nome_paciente = nome_match.group(1).strip()
-    else:
-        nome_paciente = "Paciente"
+    nome_paciente = "Paciente"
+    data = datetime.now()
 
     # =========================
-    # DATA DO EXAME
+    # PEGAR NOME E DATA
     # =========================
-    data_match = re.search(r'COLETADO EM: (\d{2}/\d{2}/\d{4})', texto)
+    for i, linha in enumerate(linhas):
+        linha_limpa = linha.strip()
 
-    if data_match:
-        data = datetime.strptime(data_match.group(1), "%d/%m/%Y")
-    else:
-        data = datetime.now()
+        # detectar data e nome acima
+        if re.match(r'\d{2}/\d{2}/\d{4}', linha_limpa):
+            if i > 0:
+                nome_paciente = linhas[i-1].strip()
 
-    # =========================
-    # EXAMES QUE QUEREMOS
-    # =========================
-    EXAMES_VALIDOS = [
-        "PROTEINA C-REATIVA",
-        "ACIDO LACTICO",
-        "SODIO",
-        "POTASSIO",
-        "MAGNESIO",
-        "UREIA",
-        "CREATININA"
-    ]
+        # detectar data coleta
+        if "COLETADO EM:" in linha:
+            match = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
+            if match:
+                data = datetime.strptime(match.group(1), "%d/%m/%Y")
 
     # =========================
-    # REGEX PRINCIPAL (ROBUSTO)
+    # EXTRAÇÃO POR BLOCOS
     # =========================
-    padrao = re.findall(
-        r'([A-ZÁÉÍÓÚÇ\s,]+)\n(?:.*\n){0,5}?RESULTADO\s*\n\s*([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
-        texto
-    )
+    for i in range(len(linhas)):
 
-    for nome, valor, unidade in padrao:
-        nome_limpo = nome.strip()
+        linha = linhas[i].strip()
 
-        if any(exame in nome_limpo for exame in EXAMES_VALIDOS):
-            dados.append({
-                "exame": nome_limpo,
-                "valor": float(valor.replace(",", ".")),
-                "unidade": unidade
-            })
+        # Nome de exame em caixa alta
+        if linha.isupper() and len(linha) > 5:
+
+            nome_exame = linha
+
+            # procurar valor nas próximas linhas
+            for j in range(i, min(i+10, len(linhas))):
+                linha2 = linhas[j]
+
+                match = re.search(r'([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)', linha2)
+
+                if match:
+                    valor = float(match.group(1).replace(",", "."))
+                    unidade = match.group(2)
+
+                    dados.append({
+                        "exame": nome_exame,
+                        "valor": valor,
+                        "unidade": unidade
+                    })
+                    break
 
     # =========================
     # GASOMETRIA
