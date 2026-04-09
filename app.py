@@ -2,13 +2,11 @@ import streamlit as st
 import pdfplumber
 import re
 import hashlib
-import io  # ✅ FALTAVA ISSO
+import io
 from datetime import datetime
 import pandas as pd
 import plotly.express as px
 from supabase import create_client
-
-st.text(texto[:2000])
 
 # ================= CONFIG =================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -30,7 +28,7 @@ def login():
             st.session_state.logado = True
             st.rerun()
         else:
-            st.error("Erro no login")
+            st.error("Usuário ou senha inválidos")
 
 if not st.session_state.logado:
     login()
@@ -50,50 +48,51 @@ def extrair_texto_bytes(conteudo):
     texto = ""
     with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
         for p in pdf.pages:
-            texto += p.extract_text() + "\n"
+            t = p.extract_text()
+            if t:
+                texto += t + "\n"
     return texto
 
 
+# 👤 PACIENTE CORRETO
+def extrair_paciente(texto):
+    match = re.search(r"Cliente:\s*(.+)", texto)
+    if match:
+        return match.group(1).strip()
+    return "Paciente"
+
+
+# 📅 DATA CORRETA
 def extrair_data(texto):
-    match = re.search(r"Data da Ficha:\s*\n?\s*\d+\n(\d{2}/\d{2}/\d{4})", texto)
+    match = re.search(r"Data da Ficha:.*?(\d{2}/\d{2}/\d{4})", texto)
     if match:
         return datetime.strptime(match.group(1), "%d/%m/%Y").date()
     return None
 
 
-def extrair_paciente(texto):
-    linhas = texto.split("\n")
-    for i, linha in enumerate(linhas):
-        if "Cliente:" in linha:
-            return linhas[i+1].strip()
-    return "Paciente"
-
-
+# 🧪 PARSER DE EXAMES (ROBUSTO)
 def extrair_exames(texto):
     exames = []
-    linhas = texto.split("\n")
 
-    for i, linha in enumerate(linhas):
-        if re.match(r"^[A-ZÇÃÕÁÉÍÓÚ ,\-()]+$", linha) and "," in linha:
-            nome = linha.strip()
+    padrao = re.findall(
+        r"([A-ZÇÃÕÁÉÍÓÚ \-/()]+)\s+(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)",
+        texto
+    )
 
-            for j in range(i+1, i+6):
-                if j < len(linhas):
-                    m = re.search(r"(\d+[\.,]?\d*)\s*(mg/dL|mmol/L|U/L|mEq/L|%)", linhas[j])
-                    if m:
-                        exames.append({
-                            "nome_exame": nome,
-                            "valor": float(m.group(1).replace(",", ".")),
-                            "unidade": m.group(2)
-                        })
-                        break
+    for nome, valor, unidade in padrao:
+        exames.append({
+            "nome_exame": nome.strip(),
+            "valor": float(valor.replace(",", ".")),
+            "unidade": unidade
+        })
+
     return exames
 
 
 def salvar_upload(paciente, data, hash_arquivo, nome):
     supabase.table("uploads").insert({
         "paciente": paciente,
-        "data_exame": str(data),
+        "data_exame": str(data) if data else None,
         "arquivo_hash": hash_arquivo,
         "nome_arquivo": nome
     }).execute()
@@ -101,10 +100,11 @@ def salvar_upload(paciente, data, hash_arquivo, nome):
 
 def salvar_exames(dados, hash_arquivo):
     lista = []
+
     for ex in dados["exames"]:
         lista.append({
             "paciente": dados["paciente"],
-            "data_exame": str(dados["data"]),
+            "data_exame": str(dados["data"]) if dados["data"] else None,
             "nome_exame": ex["nome_exame"],
             "valor": ex["valor"],
             "unidade": ex["unidade"],
@@ -113,6 +113,7 @@ def salvar_exames(dados, hash_arquivo):
 
     if lista:
         supabase.table("exames").insert(lista).execute()
+
 
 # ================= UI =================
 
@@ -127,9 +128,13 @@ if arquivo:
     existe = supabase.table("uploads").select("*").eq("arquivo_hash", hash_arquivo).execute()
 
     if existe.data:
-        st.warning("Arquivo já enviado")
+        st.warning("⚠️ Esse arquivo já foi enviado.")
     else:
         texto = extrair_texto_bytes(conteudo)
+
+        # DEBUG (pode remover depois)
+        with st.expander("🔍 Texto extraído"):
+            st.text(texto[:2000])
 
         dados = {
             "paciente": extrair_paciente(texto),
@@ -137,23 +142,39 @@ if arquivo:
             "exames": extrair_exames(texto)
         }
 
-        st.write(dados)
+        st.subheader("📋 Dados extraídos")
+        st.json(dados)
 
-        if st.button("Salvar"):
+        if st.button("💾 Salvar no banco"):
             salvar_upload(dados["paciente"], dados["data"], hash_arquivo, arquivo.name)
             salvar_exames(dados, hash_arquivo)
-            st.success("Salvo!")
+            st.success("✅ Dados salvos com sucesso!")
 
 # ================= DASHBOARD =================
+
+st.divider()
+st.subheader("📈 Evolução dos Exames")
 
 dados_db = supabase.table("exames").select("*").execute().data
 
 if dados_db:
     df = pd.DataFrame(dados_db)
 
-    exame = st.selectbox("Exame", df["nome_exame"].unique())
+    df["data_exame"] = pd.to_datetime(df["data_exame"])
 
-    df_f = df[df["nome_exame"] == exame]
+    exame = st.selectbox("Selecione o exame", df["nome_exame"].unique())
 
-    fig = px.line(df_f, x="data_exame", y="valor", markers=True)
+    df_f = df[df["nome_exame"] == exame].sort_values("data_exame")
+
+    fig = px.line(
+        df_f,
+        x="data_exame",
+        y="valor",
+        markers=True  # ✅ resolve seu problema do gráfico
+    )
+
     st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(df_f)
+else:
+    st.info("Nenhum exame ainda salvo.")
