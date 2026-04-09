@@ -19,10 +19,10 @@ def extrair_dados(pdf_file):
     dados = []
 
     padrao = re.findall(
-        r'\n([A-ZÁÉÍÓÚÇ\s,]+)\n.*?RESULTADO.*?\n([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L|%)',
-        texto,
-        re.DOTALL
-    )
+    r'([A-ZÁÉÍÓÚÇ\s,]+)\n.*?RESULTADO.*?\n\s*([\d,\.]+)\s*(mg/dL|mEq/L|mmol/L)',
+    texto,
+    re.DOTALL
+)
 
     for nome, valor, unidade in padrao:
         dados.append({
